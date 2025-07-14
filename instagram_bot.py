@@ -44,25 +44,37 @@ def comment_to_user(username):
             print(f"⏭️ @{username} atlandı (rastgele skip)")
             return False
         
-        user_id = cl.user_id_from_username(username)
+        # Kullanıcı ID'sini al - sessizce hata yönet
+        try:
+            user_id = cl.user_id_from_username(username)
+        except:
+            print(f"⚠️ @{username} kullanıcısı bulunamadı")
+            return False
+        
+        # Medyaları al - sessizce hata yönet
         try:
             medias = cl.user_medias(user_id, amount=1)
-        except KeyError:
-            print(f"⚠️ Instagram yanıtında 'data' eksik: @{username}")
+        except:
+            print(f"⚠️ @{username} medya verisi alınamadı")
             return False
 
         if not medias:
-            print(f"⚠️ @{username} için gönderi bulunamadı.")
+            print(f"⚠️ @{username} için gönderi bulunamadı")
             return False
         
-        media_id = medias[0].id
-        comment = get_random_comment()
-        cl.media_comment(media_id, comment)
-        print(f"💬 @{username} gönderisine yorum: {comment}")
-        return True
+        # Yorum at
+        try:
+            media_id = medias[0].id
+            comment = get_random_comment()
+            cl.media_comment(media_id, comment)
+            print(f"💬 @{username} gönderisine yorum: {comment}")
+            return True
+        except:
+            print(f"⚠️ @{username} yorum atılamadı")
+            return False
         
     except Exception as e:
-        print(f"❌ Hata @{username}: {str(e)}")
+        print(f"❌ @{username} genel hata")
         return False
 
 def run_comment_cycle():
@@ -72,11 +84,15 @@ def run_comment_cycle():
     
     print(f"🎯 Bu döngüde {len(shuffled_users)} sayfaya yorum atılacak...")
     
+    successful_comments = 0
+    
     for i, username in enumerate(shuffled_users):
         print(f"\n📍 [{i+1}/{len(shuffled_users)}] @{username} işleniyor...")
         
         # Yorum at
         success = comment_to_user(username)
+        if success:
+            successful_comments += 1
         
         # Son kullanıcı değilse sayfalar arası bekleme
         if i < len(shuffled_users) - 1:
@@ -86,9 +102,12 @@ def run_comment_cycle():
         
         # Hata durumunda ek bekleme
         if not success:
-            extra_delay = random.randint(30, 60)
+            extra_delay = random.randint(30, 90)
             print(f"⏳ Hata sonrası ek bekleme: {extra_delay} saniye")
             time.sleep(extra_delay)
+    
+    print(f"\n📊 Döngü özeti: {successful_comments}/{len(shuffled_users)} başarılı yorum")
+    return successful_comments
 
 def run_comment_loop():
     """Ana döngü - 60-90 dakika aralarla tüm sayfalara yorum at"""
@@ -100,11 +119,13 @@ def run_comment_loop():
 
         # Tüm sayfalara yorum at
         cycle_start = time.time()
-        run_comment_cycle()
+        successful_comments = run_comment_cycle()
         cycle_end = time.time()
         
         cycle_duration = cycle_end - cycle_start
-        print(f"\n✅ Döngü #{loop_count} tamamlandı! Süre: {cycle_duration // 60:.0f} dakika {cycle_duration % 60:.0f} saniye")
+        print(f"\n✅ Döngü #{loop_count} tamamlandı!")
+        print(f"📊 Başarılı yorum: {successful_comments}/{len(target_users)}")
+        print(f"⏱️ Süre: {cycle_duration // 60:.0f} dakika {cycle_duration % 60:.0f} saniye")
 
         # Ana döngü bekleme süresi (60-90 dakika)
         main_delay = random.randint(3600, 5400)  # 60–90 dakika
@@ -128,3 +149,9 @@ if __name__ == "__main__":
         print("\n🛑 Bot durduruldu!")
     except Exception as e:
         print(f"\n❌ Beklenmeyen hata: {str(e)}")
+        print("🔄 Bot yeniden başlatılıyor...")
+        time.sleep(60)  # 1 dakika bekle
+        try:
+            run_comment_loop()
+        except:
+            print("❌ Yeniden başlatma başarısız!")
