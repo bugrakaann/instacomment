@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 # Çalışma dizinini belirle
 WORKDIR /app
@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Uygulamayı başlat
-CMD ["python", "main.py"]
+CMD ["python", "instagram_bot.py"]
