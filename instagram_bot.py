@@ -8,6 +8,9 @@ import os
 USERNAME = os.getenv("USERNAME")
 PASSWORD = os.getenv("PASSWORD")
 
+# Her kullanıcı için farklı random davranış için seed ayarla
+random.seed(time.time() + hash(USERNAME))
+
 target_users = [
     "sevgili_bulma_tanisma_grubu",
     "arkadaslik_sohbet_sayfasi_van",
@@ -46,7 +49,7 @@ def run_comment_loop():
         username = next(user_cycle)
 
         try:
-            if random.random() < 0.3:
+            if random.random() < 0.2:
                 print(f"⏭️ @{username} atlandı (rastgele skip)")
             else:
                 user_id = cl.user_id_from_username(username)
