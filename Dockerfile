@@ -10,5 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Kodları kopyala
 COPY . .
 
+ENV USERNAME=default_user
+ENV PASSWORD=default_pass
 # Uygulamayı başlat
 CMD ["python", "instagram_bot.py"]

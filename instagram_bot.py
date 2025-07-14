@@ -3,9 +3,10 @@ import random
 import time
 from datetime import datetime
 import itertools
+import os
 
-USERNAME = "usr"
-PASSWORD = "pwd"
+USERNAME = os.getenv("USERNAME")
+PASSWORD = os.getenv("PASSWORD")
 
 target_users = [
     "sevgili_bulma_tanisma_grubu",
