@@ -1,13 +1,17 @@
 from instagrapi import Client
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import gc  # Garbage collection
 import psutil  # RAM kullanımını izlemek için
 
 USERNAME = os.getenv("USERNAME")
 PASSWORD = os.getenv("PASSWORD")
+
+# TAKIPÇI İSTEKLERİ İÇİN AYARLAR
+ACCEPT_REQUESTS_TIME = "14:30"  # Takipçi isteklerinin kabul edileceği saat (HH:MM)
+ACCEPT_REQUESTS_ENABLED = True  # Takipçi isteklerini kabul etme özelliği
 
 # Her kullanıcı için farklı random davranış için seed ayarla
 random.seed(time.time() + hash(USERNAME))
@@ -62,6 +66,142 @@ def safe_login():
                 time.sleep(30)  # 30 saniye bekle
             else:
                 raise e
+
+def is_target_time(target_time_str):
+    """Belirtilen saatin gelip gelmediğini kontrol et"""
+    try:
+        now = datetime.now()
+        target_hour, target_minute = map(int, target_time_str.split(':'))
+        target_time = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+        
+        # Eğer hedef saat geçmişse, yarın için ayarla
+        if target_time < now:
+            target_time += timedelta(days=1)
+        
+        # Hedef saate 2 dakika veya daha az kaldıysa True döndür
+        time_diff = (target_time - now).total_seconds()
+        return time_diff <= 120  # 2 dakika = 120 saniye
+    except:
+        return False
+
+def accept_follow_requests(cl):
+    """Tüm takipçi isteklerini doğal delaylerle kabul et - Memory optimized"""
+    try:
+        print("🔍 Takipçi istekleri kontrol ediliyor...")
+        mem_before = get_memory_usage()
+        
+        # Takipçi isteklerini al
+        pending_requests = cl.user_followers_pending()
+        
+        if not pending_requests:
+            print("📭 Bekleyen takipçi isteği yok")
+            return 0
+        
+        total_requests = len(pending_requests)
+        accepted_count = 0
+        print(f"📬 {total_requests} takipçi isteği bulundu")
+        
+        # Eğer çok fazla istek varsa, bellek tasarrufu için küçük gruplara böl
+        batch_size = 10 if total_requests > 50 else total_requests
+        
+        for i in range(0, total_requests, batch_size):
+            batch = pending_requests[i:i+batch_size]
+            print(f"📦 Batch {i//batch_size + 1}/{(total_requests + batch_size - 1)//batch_size} işleniyor...")
+            
+            for j, user in enumerate(batch):
+                try:
+                    # RAM kontrolü - her 5 istekte bir
+                    if (i + j) % 5 == 0:
+                        current_mem = get_memory_usage()
+                        if current_mem > 600:  # 600MB üzerinde
+                            print(f"⚠️ RAM yüksek ({current_mem:.1f}MB) - kısa bellek temizleme...")
+                            force_garbage_collection()
+                    
+                    # Takipçi isteğini kabul et
+                    cl.user_following_approve(user.pk)
+                    accepted_count += 1
+                    print(f"✅ [{accepted_count}/{total_requests}] @{user.username} kabul edildi")
+                    
+                    # Doğal insan davranışı için değişken delayler
+                    if accepted_count % 3 == 0:
+                        # Her 3 istekte bir daha uzun bekleme
+                        delay = random.randint(8, 15)
+                        print(f"⏳ Ara bekleme: {delay} saniye")
+                    else:
+                        # Normal bekleme
+                        delay = random.randint(3, 7)
+                    
+                    time.sleep(delay)
+                    
+                    # Her 10 istekte bir ekstra bekleme (bot olmamak için)
+                    if accepted_count % 10 == 0 and accepted_count < total_requests:
+                        extra_delay = random.randint(15, 30)
+                        print(f"⏳ 10 istek sonrası ekstra bekleme: {extra_delay} saniye")
+                        time.sleep(extra_delay)
+                    
+                except Exception as e:
+                    print(f"❌ @{user.username} isteği kabul edilemedi: {str(e)[:50]}")
+                    # Hata durumunda da kısa bekleme
+                    time.sleep(random.randint(2, 5))
+                    continue
+            
+            # Batch sonrası bellek temizleme
+            if i + batch_size < total_requests:
+                force_garbage_collection()
+                batch_delay = random.randint(20, 40)
+                print(f"⏳ Batch arası bekleme: {batch_delay} saniye")
+                time.sleep(batch_delay)
+        
+        # Son bellek temizleme
+        force_garbage_collection()
+        mem_after = get_memory_usage()
+        
+        print(f"🎉 Toplam {accepted_count}/{total_requests} takipçi isteği kabul edildi!")
+        print(f"📊 RAM kullanımı: {mem_before:.1f}MB → {mem_after:.1f}MB (Δ{mem_after-mem_before:+.1f}MB)")
+        
+        return accepted_count
+        
+    except Exception as e:
+        print(f"❌ Takipçi istekleri işlenirken hata: {str(e)[:100]}")
+        force_garbage_collection()  # Hata durumunda da bellek temizle
+        return 0
+
+def check_and_accept_requests(cl):
+    """Saati kontrol et ve takipçi isteklerini doğal şekilde kabul et"""
+    if not ACCEPT_REQUESTS_ENABLED:
+        return
+    
+    if is_target_time(ACCEPT_REQUESTS_TIME):
+        print(f"🕒 Hedef saat ({ACCEPT_REQUESTS_TIME}) geldi! Takipçi istekleri doğal delaylerle kabul ediliyor...")
+        
+        # Başlangıç bellek durumu
+        mem_start = get_memory_usage()
+        print(f"🧠 İşlem öncesi RAM: {mem_start:.1f}MB")
+        
+        # Takipçi isteklerini kabul et
+        accepted = accept_follow_requests(cl)
+        
+        if accepted > 0:
+            print(f"🎊 {accepted} takipçi isteği başarıyla kabul edildi!")
+            
+            # Tüm işlem sonrası ekstra bekleme (bot olmamak için)
+            final_delay = random.randint(60, 120)
+            print(f"⏳ Takipçi işlemi sonrası son bekleme: {final_delay} saniye")
+            time.sleep(final_delay)
+        
+        # İşlem sonrası bellek durumu
+        mem_end = get_memory_usage()
+        print(f"🧠 İşlem sonrası RAM: {mem_end:.1f}MB")
+        
+        # Son bellek temizleme
+        force_garbage_collection()
+        
+        # İşlem tamamlandıktan sonra bir sonraki hedef zamanı bildir
+        next_target = get_next_target_time()
+        if next_target:
+            print(f"📅 Bir sonraki takipçi kontrolü: {next_target.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        print("=" * 50)
 
 def comment_to_user(cl, username):
     """Belirtilen kullanıcıya yorum at - bellek optimizasyonu ile"""
@@ -129,6 +269,9 @@ def run_comment_cycle(cl):
     for i, username in enumerate(shuffled_users):
         print(f"\n📍 [{i+1}/{len(shuffled_users)}] @{username} işleniyor...")
         
+        # Her kullanıcı işlemi öncesi takipçi isteklerini kontrol et
+        check_and_accept_requests(cl)
+        
         # RAM kontrolü - %80'i aşarsa garbage collection
         current_mem = get_memory_usage()
         if current_mem > 800:  # 800MB üzerinde
@@ -172,8 +315,23 @@ def check_session_health(cl):
         print(f"⚠️ Session sorunu tespit edildi: {str(e)[:50]}...")
         return False
 
+def get_next_target_time():
+    """Bir sonraki hedef saati hesapla"""
+    try:
+        now = datetime.now()
+        target_hour, target_minute = map(int, ACCEPT_REQUESTS_TIME.split(':'))
+        target_time = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+        
+        # Eğer hedef saat geçmişse, yarın için ayarla
+        if target_time < now:
+            target_time += timedelta(days=1)
+        
+        return target_time
+    except:
+        return None
+
 def run_comment_loop():
-    """Ana döngü - 60-90 dakika aralarla tüm sayfalara yorum at"""
+    """Ana döngü - 60-90 dakika aralarla tüm sayfalara yorum at + takipçi isteklerini kontrol et"""
     loop_count = 0
     cl = None
     
@@ -184,6 +342,13 @@ def run_comment_loop():
         print(f"❌ İlk giriş başarısız: {str(e)}")
         return
 
+    # Takipçi istekleri bilgisini göster
+    if ACCEPT_REQUESTS_ENABLED:
+        next_target = get_next_target_time()
+        if next_target:
+            print(f"🕒 Takipçi istekleri {ACCEPT_REQUESTS_TIME} saatinde kabul edilecek")
+            print(f"📅 Sonraki hedef: {next_target.strftime('%Y-%m-%d %H:%M:%S')}")
+    
     while True:
         loop_count += 1
         print(f"\n🔄 ===== DÖNGÜ #{loop_count} BAŞLIYOR ===== @ {datetime.now().strftime('%H:%M:%S')}")
@@ -197,6 +362,9 @@ def run_comment_loop():
                 print(f"❌ Session yenileme başarısız: {str(e)}")
                 time.sleep(600)  # 10 dakika bekle
                 continue
+
+        # Döngü başında takipçi isteklerini kontrol et
+        check_and_accept_requests(cl)
 
         # Sistem bellek kontrolü
         try:
@@ -231,6 +399,16 @@ def run_comment_loop():
         print(f"📊 Başarılı yorum: {successful_comments}/{len(target_users)}")
         print(f"⏱️ Süre: {cycle_duration // 60:.0f} dakika {cycle_duration % 60:.0f} saniye")
 
+        # Takipçi istekleri durumunu göster
+        if ACCEPT_REQUESTS_ENABLED:
+            next_target = get_next_target_time()
+            if next_target:
+                time_until_target = (next_target - datetime.now()).total_seconds()
+                if time_until_target > 0:
+                    hours = int(time_until_target // 3600)
+                    minutes = int((time_until_target % 3600) // 60)
+                    print(f"🕒 Takipçi istekleri kontrolüne {hours}s {minutes}dk kaldı")
+
         # Ana döngü bekleme süresi (60-90 dakika)
         main_delay = random.randint(3600, 5400)  # 60–90 dakika
         print(f"⏰ Sonraki döngüye kadar bekleme: {main_delay // 60} dakika")
@@ -240,14 +418,33 @@ def run_comment_loop():
         # Bekleme sırasında bellek temizleme
         force_garbage_collection()
         
-        time.sleep(main_delay)
+        # Bekleme sırasında takipçi isteklerini kontrol et (daha az sıklıkla)
+        sleep_intervals = 600  # 10 dakika aralıklar (daha az sıklıkla kontrol)
+        remaining_time = main_delay
+        
+        while remaining_time > 0:
+            sleep_time = min(sleep_intervals, remaining_time)
+            time.sleep(sleep_time)
+            remaining_time -= sleep_time
+            
+            # Her 10 dakikada bir takipçi isteklerini kontrol et (daha az sıklıkla)
+            if remaining_time > 0:
+                check_and_accept_requests(cl)
+                
+                # Takipçi kontrolü sonrası bellek temizleme
+                if remaining_time > 300:  # 5 dakikadan fazla kaldıysa
+                    force_garbage_collection()
 
 # ▶️ BAŞLAT
 if __name__ == "__main__":
-    print("🤖 Instagram Comment Bot - RAM Optimized (60–90dk döngü)")
+    print("🤖 Instagram Comment Bot + Takipçi İstekleri - RAM Optimized")
     print("📋 Hedef sayfalar:")
     for i, user in enumerate(target_users, 1):
         print(f"   {i}. @{user}")
+    
+    print(f"\n🕒 Takipçi istekleri ayarları:")
+    print(f"   ✅ Özellik: {'Aktif' if ACCEPT_REQUESTS_ENABLED else 'Pasif'}")
+    print(f"   ⏰ Hedef saat: {ACCEPT_REQUESTS_TIME}")
     print()
     
     # Başlangıç sistem bilgileri
