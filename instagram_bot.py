@@ -16,8 +16,8 @@ ACCEPT_REQUESTS_TIME = "14:30"  # Takipçi isteklerinin kabul edileceği saat (H
 ACCEPT_REQUESTS_ENABLED = True  # Takipçi isteklerini kabul etme özelliği
 
 # ÇALIŞMA SAATLERİ AYARLARI
-WORK_START_TIME = "09:00"  # Botun çalışmaya başlayacağı saat (HH:MM)
-WORK_END_TIME = "22:00"    # Botun çalışmayı durduracağı saat (HH:MM)
+WORK_START_TIME = "11:00"  # Botun çalışmaya başlayacağı saat (HH:MM)
+WORK_END_TIME = "23:00"    # Botun çalışmayı durduracağı saat (HH:MM)
 WORK_HOURS_ENABLED = True  # Çalışma saatleri kontrolü
 
 # Her kullanıcı için farklı random davranış için seed ayarla
@@ -333,7 +333,12 @@ def comment_to_user(cl, username):
         
         # Kullanıcı ID'sini al
         try:
-            user_id = cl.user_id_from_username(username)
+            results = cl.search_users(username)
+            if not results:
+                print(f"⚠️ @{username} kullanıcısı bulunamadı (search_users boş)")
+                return False
+            user_id = results[0].pk
+
         except Exception as e:
             print(f"⚠️ @{username} kullanıcısı bulunamadı")
             return False
@@ -365,7 +370,7 @@ def comment_to_user(cl, username):
             
             return True
         except Exception as e:
-            print(f"⚠️ @{username} yorum atılamadı: {str(e)[:50]}")
+            print(f"⚠️ @{username} yorum atılamadı: {str(e)[:500]}")
             return False
         
     except Exception as e:
