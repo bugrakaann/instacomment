@@ -155,33 +155,37 @@ def get_next_working_time():
         return None
 
 def safe_login():
-    """Güvenli giriş - sadece cookie kullanımı"""
+    """Güvenli giriş - sadece cookie kullanımı + session sağlığı kontrolü + loglama"""
     try:
+        print("🔐 Client başlatılıyor...")
         cl = Client()
         
-        # Proxy ayarlarını yap
+        # Proxy kullanılıyorsa ayarla
         if PROXY_URL:
-            setup_proxy(cl, PROXY_URL)
-        
-        # Session yüklemeyi dene
+            print(f"🌐 Proxy ayarlanıyor: {PROXY_URL[:30]}...")
+            if not setup_proxy(cl, PROXY_URL):
+                raise Exception("Proxy ayarlanamadı veya geçersiz.")
+
+        # Session dosyası yükleniyor
+        print(f"📁 Session yükleniyor: {COOKIE_FILE}")
         session_loaded = load_session(cl, COOKIE_FILE)
-        
         if not session_loaded:
-            raise Exception("Cookie dosyası yüklenemedi. Lütfen session.json dosyasını kontrol edin.")
-        
-        # Session'ı test et
+            raise Exception(f"Session dosyası yüklenemedi veya eksik: {COOKIE_FILE}")
+
+        # Session geçerli mi? Test et
+        print("🔎 Session geçerliliği test ediliyor (account_info)...")
         try:
             account_info = cl.account_info()
-            username = account_info.username
-            print(f"✅ Cookie ile giriş başarılı: @{username} @ {datetime.now().strftime('%H:%M:%S')}")
+            print(f"✅ Cookie ile giriş BAŞARILI → @{account_info.username} (ID: {account_info.pk})")
             return cl
         except Exception as e:
-            print(f"❌ Cookie geçersiz: {str(e)[:100]}")
-            raise Exception("Cookie geçersiz veya süresi dolmuş")
-                
+            print(f"❌ Session GEÇERSİZ — {type(e).__name__}: {str(e)[:300]}")
+            raise Exception("Session geçersiz, cookie dosyası hatalı veya süresi dolmuş.")
+
     except Exception as e:
-        print(f"❌ Giriş hatası: {str(e)[:100]}")
+        print(f"🚫 Giriş başarısız — {type(e).__name__}: {str(e)[:300]}")
         raise e
+
 
 def is_target_time(target_time_str):
     """Belirtilen saatin gelip gelmediğini kontrol et"""
@@ -326,59 +330,56 @@ def comment_to_user(cl, username):
     """Belirtilen kullanıcıya yorum at - bellek optimizasyonu ile"""
     try:
         mem_before = get_memory_usage()
-        
-        if random.random() < 0.1:  # %10 şansla skip
+        print(f"📌 @{username} için işlem başlatıldı...")
+
+        if random.random() < 0.1:
             print(f"⏭️ @{username} atlandı (rastgele skip)")
             return False
-        
-        # Kullanıcı ID'sini al
+
         try:
+            print(f"🔍 @{username} kullanıcı ID'si aranıyor...")
             results = cl.search_users(username)
             if not results:
                 print(f"⚠️ @{username} kullanıcısı bulunamadı (search_users boş)")
                 return False
             user_id = results[0].pk
-
+            print(f"✅ Kullanıcı ID bulundu: {user_id}")
         except Exception as e:
-            print(f"⚠️ @{username} kullanıcısı bulunamadı")
+            print(f"❌ @{username} kullanıcı arama hatası: {e}")
             return False
-        
-        # Medyaları al - sadece 1 tane, daha az bellek kullanımı
+
         try:
+            print(f"📥 @{username} için medya verisi alınıyor...")
             medias = cl.user_medias(user_id, amount=1)
         except Exception as e:
-            print(f"⚠️ @{username} medya verisi alınamadı")
+            print(f"❌ Medya çekme hatası: {e}")
             return False
 
         if not medias:
-            print(f"⚠️ @{username} için gönderi bulunamadı")
+            print(f"⚠️ @{username} için hiç gönderi bulunamadı")
             return False
-        
-        # Yorum at
+
         try:
             media_id = medias[0].id
             comment = get_random_comment()
+            print(f"💬 Yorum atılıyor: \"{comment}\"")
             cl.media_comment(media_id, comment)
-            print(f"💬 @{username} gönderisine yorum: {comment}")
-            
-            # Medya objesini sil
-            del medias
-            del media_id
-            
+            print(f"✅ Yorum başarıyla atıldı: {comment}")
+            del medias, media_id
             mem_after = get_memory_usage()
-            print(f"📊 RAM: {mem_after:.1f}MB (Δ{mem_after-mem_before:+.1f}MB)")
-            
+            print(f"📊 RAM: {mem_after:.1f}MB (Δ{mem_after - mem_before:+.1f}MB)")
             return True
         except Exception as e:
-            print(f"⚠️ @{username} yorum atılamadı: {str(e)[:500]}")
+            print(f"❌ Yorum atma hatası: {type(e).__name__} → {str(e)[:500]}")
             return False
-        
+
     except Exception as e:
-        print(f"❌ @{username} genel hata: {str(e)[:50]}")
+        print(f"❌ Genel hata (@{username}): {type(e).__name__} → {str(e)[:100]}")
         return False
+
     finally:
-        # Her işlem sonrası bellek temizleme
         force_garbage_collection()
+
 
 def run_comment_cycle(cl):
     """Tüm sayfalara yorum atma döngüsü - bellek optimizasyonu ile"""
