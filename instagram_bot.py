@@ -5,16 +5,23 @@ from datetime import datetime, timedelta
 import os
 import gc  # Garbage collection
 import psutil  # RAM kullanımını izlemek için
+import json
 
-USERNAME = os.getenv("USERNAME")
-PASSWORD = os.getenv("PASSWORD")
+# HESAP VE PROXY AYARLARI
+COOKIE_FILE = os.getenv("COOKIE_FILE", "session.json")  # Cookie dosyası yolu
+PROXY_URL = os.getenv("PROXY_URL")  # Proxy URL'si (format: http://username:password@host:port)
 
 # TAKIPÇI İSTEKLERİ İÇİN AYARLAR
 ACCEPT_REQUESTS_TIME = "14:30"  # Takipçi isteklerinin kabul edileceği saat (HH:MM)
 ACCEPT_REQUESTS_ENABLED = True  # Takipçi isteklerini kabul etme özelliği
 
+# ÇALIŞMA SAATLERİ AYARLARI
+WORK_START_TIME = "09:00"  # Botun çalışmaya başlayacağı saat (HH:MM)
+WORK_END_TIME = "22:00"    # Botun çalışmayı durduracağı saat (HH:MM)
+WORK_HOURS_ENABLED = True  # Çalışma saatleri kontrolü
+
 # Her kullanıcı için farklı random davranış için seed ayarla
-random.seed(time.time() + hash(USERNAME))
+random.seed(time.time())
 
 target_users = [
     "sevgili_bulma_tanisma_grubu",
@@ -51,21 +58,130 @@ def force_garbage_collection():
     gc.collect()
     time.sleep(1)  # GC'nin tamamlanması için kısa bekleme
 
+def load_session(cl, filename):
+    """Session'ı dosyadan yükle"""
+    try:
+        if not os.path.exists(filename):
+            print(f"❌ Session dosyası bulunamadı: {filename}")
+            print("📝 Lütfen session.json dosyasını oluşturun ve Instagram cookie verilerinizi ekleyin")
+            return False
+        
+        with open(filename, 'r', encoding='utf-8') as f:
+            session_data = json.load(f)
+        
+        cl.set_settings(session_data)
+        print(f"✅ Session yüklendi: {filename}")
+        return True
+    except Exception as e:
+        print(f"❌ Session yüklenemedi: {str(e)[:100]}")
+        return False
+
+def save_session(cl, filename):
+    """Session'ı dosyaya kaydet"""
+    try:
+        session_data = cl.get_settings()
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(session_data, f, ensure_ascii=False, indent=2)
+        print(f"✅ Session kaydedildi: {filename}")
+        return True
+    except Exception as e:
+        print(f"❌ Session kaydedilemedi: {str(e)[:100]}")
+        return False
+
+def setup_proxy(cl, proxy_url):
+    """Proxy ayarlarını yapılandır"""
+    try:
+        if not proxy_url:
+            print("⚠️ Proxy URL'si belirtilmedi")
+            return False
+        
+        # Proxy URL'sini parse et
+        if proxy_url.startswith('http://'):
+            proxy_type = 'http'
+        elif proxy_url.startswith('https://'):
+            proxy_type = 'https'
+        else:
+            print("❌ Desteklenmeyen proxy tipi. http:// veya https:// kullanın")
+            return False
+        
+        # Proxy ayarlarını uygula
+        cl.set_proxy(proxy_url)
+        print(f"✅ Proxy ayarlandı: {proxy_type.upper()}")
+        return True
+    except Exception as e:
+        print(f"❌ Proxy ayarlanamadı: {str(e)[:100]}")
+        return False
+
+def is_working_hours():
+    """Çalışma saatleri içinde olup olmadığını kontrol et"""
+    if not WORK_HOURS_ENABLED:
+        return True
+    
+    try:
+        now = datetime.now()
+        current_time = now.time()
+        
+        start_hour, start_minute = map(int, WORK_START_TIME.split(':'))
+        end_hour, end_minute = map(int, WORK_END_TIME.split(':'))
+        
+        start_time = datetime.strptime(f"{start_hour}:{start_minute}", "%H:%M").time()
+        end_time = datetime.strptime(f"{end_hour}:{end_minute}", "%H:%M").time()
+        
+        # Eğer bitiş saati başlangıç saatinden küçükse (örn: 22:00 - 09:00)
+        if end_time <= start_time:
+            return current_time >= start_time or current_time <= end_time
+        else:
+            return start_time <= current_time <= end_time
+    except:
+        return True
+
+def get_next_working_time():
+    """Bir sonraki çalışma saatini hesapla"""
+    if not WORK_HOURS_ENABLED:
+        return None
+    
+    try:
+        now = datetime.now()
+        start_hour, start_minute = map(int, WORK_START_TIME.split(':'))
+        
+        next_start = now.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+        
+        # Eğer bugünkü çalışma saati geçmişse, yarın için ayarla
+        if next_start <= now:
+            next_start += timedelta(days=1)
+        
+        return next_start
+    except:
+        return None
+
 def safe_login():
-    """Güvenli giriş - bağlantı sorunlarında yeniden dene"""
-    max_retries = 3
-    for attempt in range(max_retries):
+    """Güvenli giriş - sadece cookie kullanımı"""
+    try:
+        cl = Client()
+        
+        # Proxy ayarlarını yap
+        if PROXY_URL:
+            setup_proxy(cl, PROXY_URL)
+        
+        # Session yüklemeyi dene
+        session_loaded = load_session(cl, COOKIE_FILE)
+        
+        if not session_loaded:
+            raise Exception("Cookie dosyası yüklenemedi. Lütfen session.json dosyasını kontrol edin.")
+        
+        # Session'ı test et
         try:
-            cl = Client()
-            cl.login(USERNAME, PASSWORD)
-            print(f"✅ Giriş başarılı @ {datetime.now().strftime('%H:%M:%S')}")
+            account_info = cl.account_info()
+            username = account_info.username
+            print(f"✅ Cookie ile giriş başarılı: @{username} @ {datetime.now().strftime('%H:%M:%S')}")
             return cl
         except Exception as e:
-            print(f"❌ Giriş hatası (deneme {attempt+1}/{max_retries}): {str(e)[:100]}")
-            if attempt < max_retries - 1:
-                time.sleep(30)  # 30 saniye bekle
-            else:
-                raise e
+            print(f"❌ Cookie geçersiz: {str(e)[:100]}")
+            raise Exception("Cookie geçersiz veya süresi dolmuş")
+                
+    except Exception as e:
+        print(f"❌ Giriş hatası: {str(e)[:100]}")
+        raise e
 
 def is_target_time(target_time_str):
     """Belirtilen saatin gelip gelmediğini kontrol et"""
@@ -196,6 +312,9 @@ def check_and_accept_requests(cl):
         # Son bellek temizleme
         force_garbage_collection()
         
+        # Session'ı güncelle
+        save_session(cl, COOKIE_FILE)
+        
         # İşlem tamamlandıktan sonra bir sonraki hedef zamanı bildir
         next_target = get_next_target_time()
         if next_target:
@@ -246,11 +365,11 @@ def comment_to_user(cl, username):
             
             return True
         except Exception as e:
-            print(f"⚠️ @{username} yorum atılamadı")
+            print(f"⚠️ @{username} yorum atılamadı: {str(e)[:50]}")
             return False
         
     except Exception as e:
-        print(f"❌ @{username} genel hata")
+        print(f"❌ @{username} genel hata: {str(e)[:50]}")
         return False
     finally:
         # Her işlem sonrası bellek temizleme
@@ -267,6 +386,11 @@ def run_comment_cycle(cl):
     successful_comments = 0
     
     for i, username in enumerate(shuffled_users):
+        # Çalışma saatleri kontrolü
+        if not is_working_hours():
+            print(f"⏰ Çalışma saatleri dışında - işlem durduruldu")
+            break
+        
         print(f"\n📍 [{i+1}/{len(shuffled_users)}] @{username} işleniyor...")
         
         # Her kullanıcı işlemi öncesi takipçi isteklerini kontrol et
@@ -296,7 +420,10 @@ def run_comment_cycle(cl):
             print(f"⏳ Hata sonrası ek bekleme: {extra_delay} saniye")
             time.sleep(extra_delay)
     
-    # Sadece bellek temizleme - logout yok
+    # Session'ı güncelle
+    save_session(cl, COOKIE_FILE)
+    
+    # Sadece bellek temizleme
     force_garbage_collection()
     
     final_mem = get_memory_usage()
@@ -330,8 +457,36 @@ def get_next_target_time():
     except:
         return None
 
+def wait_for_working_hours():
+    """Çalışma saatleri başlayana kadar bekle"""
+    if not WORK_HOURS_ENABLED:
+        return
+    
+    while not is_working_hours():
+        next_work_time = get_next_working_time()
+        if next_work_time:
+            now = datetime.now()
+            wait_seconds = (next_work_time - now).total_seconds()
+            wait_hours = int(wait_seconds // 3600)
+            wait_minutes = int((wait_seconds % 3600) // 60)
+            
+            print(f"⏰ Çalışma saatleri dışında ({WORK_START_TIME} - {WORK_END_TIME})")
+            print(f"🕒 Sonraki çalışma saati: {next_work_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"⏳ Bekleme süresi: {wait_hours} saat {wait_minutes} dakika")
+            
+            # Her 30 dakikada bir durum kontrolü
+            while wait_seconds > 0 and not is_working_hours():
+                sleep_time = min(1800, wait_seconds)  # 30 dakika veya kalan süre
+                time.sleep(sleep_time)
+                wait_seconds -= sleep_time
+                
+                if wait_seconds > 0:
+                    wait_hours = int(wait_seconds // 3600)
+                    wait_minutes = int((wait_seconds % 3600) // 60)
+                    print(f"⏳ Kalan bekleme: {wait_hours} saat {wait_minutes} dakika")
+
 def run_comment_loop():
-    """Ana döngü - 60-90 dakika aralarla tüm sayfalara yorum at + takipçi isteklerini kontrol et"""
+    """Ana döngü - sadece cookie kullanımı + çalışma saatleri kontrolü"""
     loop_count = 0
     cl = None
     
@@ -339,9 +494,16 @@ def run_comment_loop():
     try:
         cl = safe_login()
     except Exception as e:
-        print(f"❌ İlk giriş başarısız: {str(e)}")
+        print(f"❌ Cookie ile giriş başarısız: {str(e)}")
+        print("📝 Lütfen session.json dosyasını kontrol edin")
         return
 
+    # Çalışma saatleri bilgisini göster
+    if WORK_HOURS_ENABLED:
+        print(f"⏰ Çalışma saatleri: {WORK_START_TIME} - {WORK_END_TIME}")
+    else:
+        print("⏰ Çalışma saatleri kontrolü kapalı - 7/24 çalışır")
+    
     # Takipçi istekleri bilgisini göster
     if ACCEPT_REQUESTS_ENABLED:
         next_target = get_next_target_time()
@@ -350,6 +512,13 @@ def run_comment_loop():
             print(f"📅 Sonraki hedef: {next_target.strftime('%Y-%m-%d %H:%M:%S')}")
     
     while True:
+        # Çalışma saatleri kontrolü
+        wait_for_working_hours()
+        
+        # Eğer çalışma saatleri dışındaysa döngüyü devam ettir
+        if not is_working_hours():
+            continue
+        
         loop_count += 1
         print(f"\n🔄 ===== DÖNGÜ #{loop_count} BAŞLIYOR ===== @ {datetime.now().strftime('%H:%M:%S')}")
 
@@ -418,16 +587,21 @@ def run_comment_loop():
         # Bekleme sırasında bellek temizleme
         force_garbage_collection()
         
-        # Bekleme sırasında takipçi isteklerini kontrol et (daha az sıklıkla)
-        sleep_intervals = 600  # 10 dakika aralıklar (daha az sıklıkla kontrol)
+        # Bekleme sırasında takipçi isteklerini ve çalışma saatlerini kontrol et
+        sleep_intervals = 600  # 10 dakika aralıklar
         remaining_time = main_delay
         
         while remaining_time > 0:
+            # Çalışma saatleri kontrolü
+            if not is_working_hours():
+                print("⏰ Çalışma saatleri dışına çıkıldı - döngü sonlandırılıyor")
+                break
+            
             sleep_time = min(sleep_intervals, remaining_time)
             time.sleep(sleep_time)
             remaining_time -= sleep_time
             
-            # Her 10 dakikada bir takipçi isteklerini kontrol et (daha az sıklıkla)
+            # Her 10 dakikada bir takipçi isteklerini kontrol et
             if remaining_time > 0:
                 check_and_accept_requests(cl)
                 
@@ -437,32 +611,42 @@ def run_comment_loop():
 
 # ▶️ BAŞLAT
 if __name__ == "__main__":
-    print("🤖 Instagram Comment Bot + Takipçi İstekleri - RAM Optimized")
-    print("📋 Hedef sayfalar:")
-    for i, user in enumerate(target_users, 1):
-        print(f"   {i}. @{user}")
-    
-    print(f"\n🕒 Takipçi istekleri ayarları:")
-    print(f"   ✅ Özellik: {'Aktif' if ACCEPT_REQUESTS_ENABLED else 'Pasif'}")
-    print(f"   ⏰ Hedef saat: {ACCEPT_REQUESTS_TIME}")
-    print()
-    
-    # Başlangıç sistem bilgileri
-    try:
-        print(f"🧠 Sistem RAM: {psutil.virtual_memory().percent}%")
-        print(f"💾 Kullanılabilir RAM: {psutil.virtual_memory().available / 1024 / 1024:.0f}MB")
-    except:
-        print("⚠️ Sistem bilgileri alınamadı")
-    
-    try:
-        run_comment_loop()
-    except KeyboardInterrupt:
-        print("\n🛑 Bot durduruldu!")
-    except Exception as e:
-        print(f"\n❌ Beklenmeyen hata: {str(e)}")
-        print("🔄 5 dakika sonra yeniden başlatılıyor...")
-        time.sleep(300)  # 5 dakika bekle
-        try:
-            run_comment_loop()
-        except:
-            print("❌ Yeniden başlatma başarısız!")
+   print("🤖 Instagram Comment Bot - Cookie Only & Working Hours")
+   print("📋 Hedef sayfalar:")
+   for i, user in enumerate(target_users, 1):
+       print(f"   {i}. @{user}")
+   
+   print(f"\n🍪 Cookie ayarları:")
+   print(f"   📁 Cookie dosyası: {COOKIE_FILE}")
+   print(f"   ✅ Cookie giriş: {'Aktif' if os.path.exists(COOKIE_FILE) else 'Pasif (dosya yok)'}")
+   
+   print(f"\n🕒 Çalışma saatleri ayarları:")
+   print(f"   ⏰ Çalışma saatleri: {WORK_START_TIME} - {WORK_END_TIME}")
+   print(f"   🔄 Çalışma saatleri kontrolü: {'Aktif' if WORK_HOURS_ENABLED else 'Pasif'}")
+   
+   print(f"\n👥 Takipçi istekleri ayarları:")
+   print(f"   🕒 Kabul saati: {ACCEPT_REQUESTS_TIME}")
+   print(f"   ✅ Takipçi istekleri: {'Aktif' if ACCEPT_REQUESTS_ENABLED else 'Pasif'}")
+   
+   print(f"\n🌐 Proxy ayarları:")
+   print(f"   🔗 Proxy: {'Aktif' if PROXY_URL else 'Pasif'}")
+   if PROXY_URL:
+       print(f"   📡 URL: {PROXY_URL[:20]}...")
+   
+   print(f"\n💬 Yorum havuzu: {len(comments_pool)} farklı yorum")
+   print(f"🎯 Hedef sayfa sayısı: {len(target_users)}")
+   
+   print("\n" + "="*50)
+   print("🚀 Bot başlatılıyor...")
+   print("="*50)
+   
+   try:
+       run_comment_loop()
+   except KeyboardInterrupt:
+       print("\n\n⛔ Bot durduruldu (Ctrl+C)")
+   except Exception as e:
+       print(f"\n\n❌ Beklenmeyen hata: {str(e)}")
+   finally:
+       print("🔄 Bellek temizleniyor...")
+       force_garbage_collection()
+       print("👋 Bot kapatılıyor...")
