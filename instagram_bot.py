@@ -389,14 +389,11 @@ if __name__ == "__main__":
     
     print("\n" + "="*50)
     
-    # Kullanıcıya seçenek sun
-    print("Seçenekler:")
-    print("1. Normal bot başlat")
-    print("2. Tek yorum testi")
+    # Docker için environment variable kontrolü
+    TEST_MODE = os.getenv("TEST_MODE", "false").lower() == "true"
     
-    choice = input("\nSeçiminiz (1-2): ").strip()
-    
-    if choice == "2":
+    if TEST_MODE:
+        print("🧪 Test modu aktif (TEST_MODE=true)")
         test_single_comment()
     else:
         print("🚀 Bot başlatılıyor...")
