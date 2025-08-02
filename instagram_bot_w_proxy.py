@@ -7,8 +7,9 @@ import gc  # Garbage collection
 import psutil  # RAM kullanımını izlemek için
 import json
 
-# HESAP AYARLARI
+# HESAP VE PROXY AYARLARI
 COOKIE_FILE = os.getenv("COOKIE_FILE", "session.json")  # Cookie dosyası yolu
+PROXY_URL = os.getenv("PROXY_URL")  # Proxy URL'si (format: http://username:password@host:port)
 
 # TAKIPÇI İSTEKLERİ İÇİN AYARLAR
 ACCEPT_REQUESTS_TIME = "16:00"  # Takipçi isteklerinin kabul edileceği saat (HH:MM)
@@ -87,6 +88,30 @@ def save_session(cl, filename):
         print(f"❌ Session kaydedilemedi: {str(e)[:100]}")
         return False
 
+def setup_proxy(cl, proxy_url):
+    """Proxy ayarlarını yapılandır"""
+    try:
+        if not proxy_url:
+            print("⚠️ Proxy URL'si belirtilmedi")
+            return False
+        
+        # Proxy URL'sini parse et
+        if proxy_url.startswith('http://'):
+            proxy_type = 'http'
+        elif proxy_url.startswith('https://'):
+            proxy_type = 'https'
+        else:
+            print("❌ Desteklenmeyen proxy tipi. http:// veya https:// kullanın")
+            return False
+        
+        # Proxy ayarlarını uygula
+        cl.set_proxy(proxy_url)
+        print(f"✅ Proxy ayarlandı: {proxy_type.upper()}")
+        return True
+    except Exception as e:
+        print(f"❌ Proxy ayarlanamadı: {str(e)[:100]}")
+        return False
+
 def is_working_hours():
     """Çalışma saatleri içinde olup olmadığını kontrol et"""
     if not WORK_HOURS_ENABLED:
@@ -134,6 +159,12 @@ def safe_login():
     try:
         print("🔐 Client başlatılıyor...")
         cl = Client()
+        
+        # Proxy kullanılıyorsa ayarla
+        if PROXY_URL:
+            print(f"🌐 Proxy ayarlanıyor: {PROXY_URL[:30]}...")
+            if not setup_proxy(cl, PROXY_URL):
+                raise Exception("Proxy ayarlanamadı veya geçersiz.")
 
         # Session dosyası yükleniyor
         print(f"📁 Session yükleniyor: {COOKIE_FILE}")
@@ -154,6 +185,7 @@ def safe_login():
     except Exception as e:
         print(f"🚫 Giriş başarısız — {type(e).__name__}: {str(e)[:300]}")
         raise e
+
 
 def is_target_time(target_time_str):
     """Günde sadece bir kere çalışacak şekilde optimize edilmiş takipçi kontrol sistemi"""
@@ -342,6 +374,7 @@ def comment_to_user(cl, username):
     finally:
         force_garbage_collection()
 
+
 def run_comment_cycle(cl):
     """Tüm sayfalara yorum atma döngüsü - bellek optimizasyonu ile"""
     # Target userları karıştır
@@ -468,7 +501,6 @@ def cleanup_old_check_files():
                     continue
     except:
         pass
-
 def run_comment_loop():
     """Ana döngü - günde tek takipçi kontrolü + memory efficient"""
     loop_count = 0
@@ -627,6 +659,11 @@ if __name__ == "__main__":
    print(f"\n👥 Takipçi istekleri ayarları:")
    print(f"   🕒 Kabul saati: {ACCEPT_REQUESTS_TIME}")
    print(f"   ✅ Takipçi istekleri: {'Aktif' if ACCEPT_REQUESTS_ENABLED else 'Pasif'}")
+   
+   print(f"\n🌐 Proxy ayarları:")
+   print(f"   🔗 Proxy: {'Aktif' if PROXY_URL else 'Pasif'}")
+   if PROXY_URL:
+       print(f"   📡 URL: {PROXY_URL[:20]}...")
    
    print(f"\n💬 Yorum havuzu: {len(comments_pool)} farklı yorum")
    print(f"🎯 Hedef sayfa sayısı: {len(target_users)}")
